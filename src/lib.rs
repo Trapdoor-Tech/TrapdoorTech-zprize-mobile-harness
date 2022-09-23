@@ -1,3 +1,5 @@
+mod local_msm;
+
 use ark_bls12_377 as bls377;
 use ark_ff::fields::Field;
 use ark_ff::PrimeField;
@@ -7,6 +9,7 @@ use ark_serialize::SerializationError;
 use ark_serialize::Write;
 use ark_std::rand::Rng;
 use ark_std::Zero;
+use bls377::G1Affine;
 use duration_string::DurationString;
 use rand::RngCore;
 use rand::SeedableRng;
@@ -17,6 +20,7 @@ use std::fs::File;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
+use local_msm::{EdwardsAffine, ExEdwardsAffine, sw_to_edwards, edwards_to_neg_one_a, multi_scalar_mul, edwards_from_neg_one_a, edwards_proj_to_affine, edwards_to_sw};
 
 #[derive(Debug, Error)]
 pub enum HarnessError {
@@ -256,14 +260,34 @@ where
     let output_result_file = File::create(output_result_path).expect("output file creation failed");
     let mut result_vec = Vec::new();
 
+    let mut ed_instances = vec![];
     for instance in instances {
+        let points = &instance.0;
+
+        let mut ed_points = Vec::<ExEdwardsAffine>::new();
+        for p in points {
+            let ed_p = sw_to_edwards(EdwardsAffine {
+                x: p.x.clone(),
+                y: p.y.clone(),
+            });
+            let ed_p = edwards_to_neg_one_a(ed_p);
+            ed_points.push(ed_p);
+        }
+        ed_instances.push((ed_points, instance.1));
+    }
+
+    for instance in ed_instances {
         let points = &instance.0;
         let scalars = &instance.1;
 
         let mut total_duration = Duration::ZERO;
         for i in 0..iterations {
             let start = Instant::now();
-            let result = ark_ec::msm::VariableBaseMSM::multi_scalar_mul(&points[..], &scalars[..]);
+            let result = multi_scalar_mul(&points[..], &scalars[..]);
+            let result = edwards_from_neg_one_a(edwards_proj_to_affine(result));
+            let result = edwards_to_sw(result);
+            let result = G1Affine::new(result.x, result.y, false);
+
             let time = start.elapsed();
             writeln!(output_file, "iteration {}: {:?}", i + 1, time)?;
             result.serialize(&output_result_file)?;
