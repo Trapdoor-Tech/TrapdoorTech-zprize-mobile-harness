@@ -8,7 +8,7 @@ use ark_serialize::CanonicalSerialize;
 use ark_serialize::SerializationError;
 use ark_serialize::Write;
 use ark_std::rand::Rng;
-use ark_std::Zero;
+use ark_std::{One, Zero};
 use bls377::G1Affine;
 use duration_string::DurationString;
 use rand::RngCore;
@@ -21,6 +21,7 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use local_msm::{EdwardsAffine, ExEdwardsAffine, sw_to_edwards, edwards_to_neg_one_a, multi_scalar_mul, edwards_from_neg_one_a, edwards_proj_to_affine, edwards_to_sw};
+use ark_ec::AffineCurve;
 
 #[derive(Debug, Error)]
 pub enum HarnessError {
@@ -286,7 +287,14 @@ where
             let result = multi_scalar_mul(&points[..], &scalars[..]);
             let result = edwards_from_neg_one_a(edwards_proj_to_affine(result));
             let result = edwards_to_sw(result);
-            let result = G1Affine::new(result.x, result.y, false);
+
+            let result = if result.x == <G1Affine as AffineCurve>::BaseField::zero()
+                && result.y == <G1Affine as AffineCurve>::BaseField::one()
+            {
+                G1Affine::new(result.x, result.y, true)
+            } else {
+                G1Affine::new(result.x, result.y, false)
+            };
 
             let time = start.elapsed();
             writeln!(output_file, "iteration {}: {:?}", i + 1, time)?;

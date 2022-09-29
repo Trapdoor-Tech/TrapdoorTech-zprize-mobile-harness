@@ -80,9 +80,11 @@ pub struct ExEdwardsAffine {
 
 impl Default for ExEdwardsAffine {
     fn default() -> Self {
-        let x = Fq::default();
-        let y = Fq::default();
-        Self { x, y, t: x * y }
+        Self {
+            x: Fq::zero(),
+            y: Fq::one(),
+            t: Fq::zero(),
+        }
     }
 }
 
@@ -179,12 +181,21 @@ pub fn edwards_from_neg_one_a(ed: ExEdwardsAffine) -> ExEdwardsAffine {
 pub fn sw_to_edwards(g: EdwardsAffine) -> ExEdwardsAffine {
     let (alpha, beta) = get_alpha_beta();
 
+    if g.x == Fq::zero() && g.y == Fq::zero() {
+        return ExEdwardsAffine { x: Fq::zero(), y: Fq::one(), t: Fq::zero() };
+    }
+
     // first convert sw to montgomery form
     let mont_x = (g.x - alpha) / beta.clone();
     let mont_y = g.y / beta;
 
     // then from mont to edwards form
     let one = Fq::one();
+
+    if mont_y == Fq::zero() || (mont_x + one == Fq::zero()) {
+        return ExEdwardsAffine { x: Fq::zero(), y: Fq::one(), t: Fq::zero() };
+    }
+
     let ed_x = mont_x / mont_y;
     let ed_y = (mont_x - one.clone()) / (mont_x + one);
     let ed_t = ed_x * ed_y;
@@ -199,6 +210,11 @@ pub fn sw_to_edwards(g: EdwardsAffine) -> ExEdwardsAffine {
 #[allow(unused)]
 pub fn edwards_to_sw(ed: ExEdwardsAffine) -> EdwardsAffine {
     let (alpha, beta) = get_alpha_beta();
+
+    // if it is infinity point on Twisted Edwards, just return infinity point on Short Weierstrass Curve
+    if ed.y == Fq::one() || ed.x == Fq::zero() {
+        return EdwardsAffine { x: Fq::zero(), y: Fq::zero() };
+    }
 
     // first convert ed form to mont form
     let one = Fq::one();
@@ -215,6 +231,11 @@ pub fn edwards_to_sw(ed: ExEdwardsAffine) -> EdwardsAffine {
 #[allow(unused)]
 pub fn edwards_to_sw_proj(ed: ExEdwardsAffine) -> EdwardsProjective {
     let (alpha, beta) = get_alpha_beta();
+
+    // if it is infinity point on Twisted Edwards, just return infinity point on Short Weierstrass Curve
+    if ed.y == Fq::one() || ed.x == Fq::zero() {
+        return EdwardsProjective { x: Fq::zero(), y: Fq::one(), z: Fq::zero() };
+    }
 
     // first convert ed form to mont form
     let one = Fq::one();
@@ -245,6 +266,11 @@ fn edwards_affine_to_proj(ed: ExEdwardsAffine) -> ExEdwardsProjective {
 
 #[allow(unused)]
 pub fn edwards_proj_to_affine(ed: ExEdwardsProjective) -> ExEdwardsAffine {
+
+    if ed.z == Fq::zero() {
+        return ExEdwardsAffine { x: Fq::zero(), y: Fq::one(), t: Fq::zero() };
+    }
+
     let x = ed.x / ed.z;
     let y = ed.y / ed.z;
 
@@ -270,7 +296,8 @@ pub fn edwards_add_projective(ed1: ExEdwardsProjective, ed2: ExEdwardsProjective
     let A = (y1 - x1) * (y2 - x2);
     let B = (y1 + x1) * (y2 + x2);
     let C = k * t1 * t2;
-    let D = z1 * z2 + z1 * z2;
+    let D = z1 * z2;
+    let D = D + D;
     let E = B - A;
     let F = D - C;
     let G = D + C;
@@ -315,11 +342,17 @@ pub fn edwards_add_mix_a(ed1: ExEdwardsProjective, ed2: ExEdwardsAffine) -> ExEd
     // doing add_mix arithmetic
     let A = (y1 - &x1) * (y2 + &x2);
     let B = (y1 + &x1) * (y2 - &x2);
+
+    let F = B - &A;
+    if F.is_zero() { // use double
+        return edwards_double(ed1);
+    }
+
     //let C = ed1.z * t2 + ed1.z * t2;
     let C = (ed1.z * &t2).double();
     let D = t1.double();
     let E = D + &C;
-    let F = B - &A;
+    // let F = B - &A;
     let G = B + &A;
     let H = D - &C;
 
@@ -339,13 +372,16 @@ pub fn edwards_add_mix_a(ed1: ExEdwardsProjective, ed2: ExEdwardsAffine) -> ExEd
 #[allow(non_snake_case)]
 #[allow(dead_code)]
 pub fn edwards_double(ed: ExEdwardsProjective) -> ExEdwardsProjective {
-    let (a, _d) = get_a_d();
-
     let A = ed.x * ed.x;
     let B = ed.y * ed.y;
-    let C = Fq::from(2u64) * ed.z * ed.z;
-    let D = a * A;
-    let E = (ed.x + ed.y) * (ed.x + ed.y) - A - B;
+    let C = ed.z * ed.z;
+    let C = C + C;
+    let D = -A;
+
+    let E = ed.x + ed.y;
+    let E = E * E;
+    let E = E - A - B;
+
     let G = D + B;
     let F = G - C;
     let H = D - B;
